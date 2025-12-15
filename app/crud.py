@@ -261,15 +261,6 @@ async def get_user_progress_stats(db: AsyncSession, user_id: int) -> dict:
     total_cards_result = await db.execute(total_cards_query)
     total_cards = total_cards_result.scalar() or 0
     
-    now = datetime.utcnow()
-    cards_today_query = select(func.count(models.UserCardProgress.id)).where(
-        and_(
-            models.UserCardProgress.user_id == user_id,
-            models.UserCardProgress.next_review <= now
-        )
-    )
-    cards_today_result = await db.execute(cards_today_query)
-    cards_today = cards_today_result.scalar() or 0
     
     total_reviews_query = select(func.sum(models.UserCardProgress.total_attempts)).where(
         models.UserCardProgress.user_id == user_id
@@ -303,7 +294,6 @@ async def get_user_progress_stats(db: AsyncSession, user_id: int) -> dict:
     
     return {
         "total_cards": total_cards,
-        "cards_today": cards_today,
         "total_reviews": total_reviews,
         "average_score": round(average_score, 2),
         "streak_days": activity_days

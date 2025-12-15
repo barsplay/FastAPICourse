@@ -65,7 +65,6 @@ class CardResponse(CardBase):
 
 class ProgressStats(BaseModel):
     total_cards: int
-    cards_today: int
     total_reviews: int
     average_score: float
     streak_days: int
