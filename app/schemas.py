@@ -1,5 +1,5 @@
-from pydantic import BaseModel, EmailStr, validator
-from typing import Optional, List
+from pydantic import BaseModel, EmailStr, validator, Field
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 class Token(BaseModel):
@@ -30,6 +30,7 @@ class UserLogin(BaseModel):
 
 class UserResponse(UserBase):
     id: int
+    role: str
     created_at: datetime
     
     class Config:
@@ -54,30 +55,10 @@ class CardUpdate(BaseModel):
 
 class CardResponse(CardBase):
     id: int
-    user_id: int
-    correct_answers: int
-    total_attempts: int
-    last_reviewed: Optional[datetime]
-    next_review: Optional[datetime]
+    created_by: Optional[int]
     created_at: datetime
     updated_at: Optional[datetime]
-    
-    class Config:
-        from_attributes = True
-
-class StudySessionBase(BaseModel):
-    session_type: str = "test"
-    total_cards: int = 0
-    correct_answers: int = 0
-    duration_seconds: int = 0
-
-class StudySessionCreate(StudySessionBase):
-    pass
-
-class StudySessionResponse(StudySessionBase):
-    id: int
-    user_id: int
-    completed_at: datetime
+    user_progress: Optional[Dict[str, Any]] = None
     
     class Config:
         from_attributes = True
@@ -92,7 +73,6 @@ class ProgressStats(BaseModel):
 class TestAnswer(BaseModel):
     card_id: int
     user_answer: str
-    is_correct: Optional[bool] = None
 
 class TestSubmission(BaseModel):
     answers: List[TestAnswer]
@@ -102,4 +82,3 @@ class TestResult(BaseModel):
     total_questions: int
     correct_answers: int
     score_percentage: float
-    session_id: int

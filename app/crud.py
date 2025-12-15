@@ -1,5 +1,5 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, and_, select, update, delete, or_
 from typing import List, Optional
 from datetime import datetime, timedelta
 import random
@@ -7,20 +7,26 @@ import random
 from app import models, schemas
 from app.auth import get_password_hash
 
-# пользователи
-def get_user(db: Session, user_id: int):
-    return db.query(models.User).filter(models.User.id == user_id).first()
+# Пользователи
+async def get_user(db: AsyncSession, user_id: int) -> Optional[models.User]:
+    result = await db.execute(
+        select(models.User).where(models.User.id == user_id)
+    )
+    return result.scalar_one_or_none()
 
-def get_user_by_username(db: Session, username: str):
-    return db.query(models.User).filter(models.User.username == username).first()
+async def get_user_by_username(db: AsyncSession, username: str) -> Optional[models.User]:
+    result = await db.execute(
+        select(models.User).where(models.User.username == username)
+    )
+    return result.scalar_one_or_none()
 
-def get_user_by_email(db: Session, email: str):
-    return db.query(models.User).filter(models.User.email == email).first()
+async def get_user_by_email(db: AsyncSession, email: str) -> Optional[models.User]:
+    result = await db.execute(
+        select(models.User).where(models.User.email == email)
+    )
+    return result.scalar_one_or_none()
 
-def get_users(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(models.User).offset(skip).limit(limit).all()
-
-def create_user(db: Session, user: schemas.UserCreate):
+async def create_user(db: AsyncSession, user: schemas.UserCreate) -> models.User:
     hashed_password = get_password_hash(user.password)
     db_user = models.User(
         username=user.username,
@@ -28,161 +34,277 @@ def create_user(db: Session, user: schemas.UserCreate):
         hashed_password=hashed_password
     )
     db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
+    await db.commit()
+    await db.refresh(db_user)
     return db_user
 
-# карточки
-def get_card(db: Session, card_id: int):
-    return db.query(models.Card).filter(models.Card.id == card_id).first()
+# Карточки
+async def get_card(db: AsyncSession, card_id: int) -> Optional[models.Card]:
+    result = await db.execute(
+        select(models.Card).where(models.Card.id == card_id)
+    )
+    return result.scalar_one_or_none()
 
-def get_user_cards(db: Session, user_id: int, skip: int = 0, limit: int = 100):
-    return db.query(models.Card).filter(
-        models.Card.user_id == user_id
-    ).offset(skip).limit(limit).all()
+async def get_all_cards(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[models.Card]:
+    """Получить все карточки"""
+    result = await db.execute(
+        select(models.Card)
+        .order_by(models.Card.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    return result.scalars().all()
 
-def get_cards_for_review(db: Session, user_id: int, limit: int = 10):
-    """Карточки для повторения"""
-    now = datetime.utcnow()
-    return db.query(models.Card).filter(
-        and_(
-            models.Card.user_id == user_id,
-            models.Card.next_review <= now
-        )
-    ).limit(limit).all()
-
-def get_random_cards(db: Session, user_id: int, limit: int = 10):
-    """Получение карточек для теста"""
-    cards = db.query(models.Card).filter(
-        models.Card.user_id == user_id
-    ).all()
-    
-    if not cards:
-        return []
-    
-    weighted_cards = []
-    for card in cards:
-        weight = 1 / (card.total_attempts + 1)
-        weighted_cards.extend([card] * int(weight * 10))
-    
-    return random.sample(weighted_cards, min(limit, len(weighted_cards)))
-
-def create_card(db: Session, card: schemas.CardCreate, user_id: int):
+async def create_card(db: AsyncSession, card: schemas.CardCreate, admin_id: int) -> models.Card:
+    """Создать карточку"""
     db_card = models.Card(
         **card.dict(),
-        user_id=user_id
+        created_by=admin_id
     )
     db.add(db_card)
-    db.commit()
-    db.refresh(db_card)
+    await db.commit()
+    await db.refresh(db_card)
     return db_card
 
-def update_card(db: Session, card_id: int, card_update: schemas.CardUpdate, user_id: int):
-    db_card = get_card(db, card_id)
+async def update_card(
+    db: AsyncSession, 
+    card_id: int, 
+    card_update: schemas.CardUpdate
+) -> Optional[models.Card]:
+    """Обновить карточку"""
+    result = await db.execute(
+        select(models.Card).where(models.Card.id == card_id)
+    )
+    db_card = result.scalar_one_or_none()
     
     if not db_card:
-        return None
-    
-    if db_card.user_id != user_id:
         return None
     
     update_data = card_update.dict(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_card, field, value)
     
-    db.commit()
-    db.refresh(db_card)
+    db_card.updated_at = datetime.utcnow()
+    
+    await db.commit()
+    await db.refresh(db_card)
     return db_card
 
-def delete_card(db: Session, card_id: int, user_id: int):
-    db_card = get_card(db, card_id)
+async def delete_card(db: AsyncSession, card_id: int) -> bool:
+    """Удалить карточку"""
+    result = await db.execute(
+        select(models.Card).where(models.Card.id == card_id)
+    )
+    db_card = result.scalar_one_or_none()
     
     if not db_card:
         return False
     
-    if db_card.user_id != user_id:
-        return False
-    
-    db.delete(db_card)
-    db.commit()
+    await db.delete(db_card)
+    await db.commit()
     return True
 
-def update_card_progress(db: Session, card_id: int, is_correct: bool):
-    """Обновление прогресса карточки"""
-    db_card = get_card(db, card_id)
+# Прогресс
+async def get_or_create_user_progress(
+    db: AsyncSession, 
+    user_id: int, 
+    card_id: int
+) -> Optional[models.UserCardProgress]:
+    """Получить или создать прогресс пользователя по карточке"""
+    try:
+        result = await db.execute(
+            select(models.UserCardProgress).where(
+                and_(
+                    models.UserCardProgress.user_id == user_id,
+                    models.UserCardProgress.card_id == card_id
+                )
+            )
+        )
+        progress = result.scalar_one_or_none()
+        
+        if not progress:
+            progress = models.UserCardProgress(
+                user_id=user_id,
+                card_id=card_id,
+                next_review=datetime.utcnow()
+            )
+            db.add(progress)
+            await db.commit()
+            await db.refresh(progress)
+        
+        return progress
+    except Exception as e:
+        print(f"Error in get_or_create_user_progress: {e}")
+        return None
+
+async def update_user_progress(
+    db: AsyncSession, 
+    user_id: int, 
+    card_id: int, 
+    is_correct: bool
+) -> Optional[models.UserCardProgress]:
+    """Обновить прогресс пользователя по карточке"""
+    progress = await get_or_create_user_progress(db, user_id, card_id)
     
-    if not db_card:
+    if not progress:
         return None
     
-    db_card.total_attempts += 1
+    progress.total_attempts += 1
     if is_correct:
-        db_card.correct_answers += 1
+        progress.correct_answers += 1
     
-    db_card.last_reviewed = datetime.utcnow()
+    progress.last_reviewed = datetime.utcnow()
     
     if is_correct:
-        interval_days = min(30, 2 ** min(db_card.correct_answers, 5))
+        interval_days = min(30, 2 ** min(progress.correct_answers, 5))
     else:
         interval_days = 1
     
-    db_card.next_review = datetime.utcnow() + timedelta(days=interval_days)
+    progress.next_review = datetime.utcnow() + timedelta(days=interval_days)
+    progress.updated_at = datetime.utcnow()
     
-    db.commit()
-    db.refresh(db_card)
-    return db_card
+    await db.commit()
+    await db.refresh(progress)
+    return progress
 
-# сессии изучения
-def create_study_session(db: Session, session_data: schemas.StudySessionCreate, user_id: int):
-    db_session = models.StudySession(
-        **session_data.dict(),
-        user_id=user_id
-    )
-    db.add(db_session)
-    db.commit()
-    db.refresh(db_session)
-    return db_session
-
-def get_user_progress_stats(db: Session, user_id: int):
-    """Статистика прогресса пользователя"""
-    from sqlalchemy import func
-    
-    total_cards = db.query(func.count(models.Card.id)).filter(
-        models.Card.user_id == user_id
-    ).scalar() or 0
-    
-    cards_for_today = db.query(func.count(models.Card.id)).filter(
-        and_(
-            models.Card.user_id == user_id,
-            models.Card.next_review <= datetime.utcnow()
+async def get_user_progress_for_card(
+    db: AsyncSession,
+    user_id: int,
+    card_id: int
+) -> Optional[dict]:
+    """Получить прогресс пользователя по конкретной карточке"""
+    result = await db.execute(
+        select(models.UserCardProgress).where(
+            and_(
+                models.UserCardProgress.user_id == user_id,
+                models.UserCardProgress.card_id == card_id
+            )
         )
-    ).scalar() or 0
+    )
+    progress = result.scalar_one_or_none()
     
-    total_reviews = db.query(func.sum(models.Card.total_attempts)).filter(
-        models.Card.user_id == user_id
-    ).scalar() or 0
+    if progress:
+        return {
+            "correct_answers": progress.correct_answers,
+            "total_attempts": progress.total_attempts,
+            "last_reviewed": progress.last_reviewed,
+            "next_review": progress.next_review
+        }
+    return None
+
+async def get_cards_for_user_review(
+    db: AsyncSession, 
+    user_id: int, 
+    limit: int = 10
+) -> List[models.Card]:
+    """Получить карточки для повторения пользователем."""
+    now = datetime.utcnow()
     
-    total_correct = db.query(func.sum(models.Card.correct_answers)).filter(
-        models.Card.user_id == user_id
-    ).scalar() or 0
+    query = select(models.Card).join(
+        models.UserCardProgress,
+        and_(
+            models.UserCardProgress.card_id == models.Card.id,
+            models.UserCardProgress.user_id == user_id
+        ),
+        isouter=True
+    ).where(
+        or_(
+            models.UserCardProgress.id == None,
+            models.UserCardProgress.next_review <= now
+        )
+    ).order_by(
+        models.UserCardProgress.next_review.asc().nullsfirst()
+    ).limit(limit)
+    
+    result = await db.execute(query)
+    return result.scalars().all()
+
+async def get_random_cards_for_user(
+    db: AsyncSession, 
+    user_id: int, 
+    limit: int = 10
+) -> List[models.Card]:
+    """Получить случайные карточки для теста пользователя"""
+    result = await db.execute(select(models.Card))
+    all_cards = result.scalars().all()
+    
+    if not all_cards:
+        return []
+    
+    weighted_cards = []
+    
+    for card in all_cards:
+        progress_result = await db.execute(
+            select(models.UserCardProgress).where(
+                and_(
+                    models.UserCardProgress.user_id == user_id,
+                    models.UserCardProgress.card_id == card.id
+                )
+            )
+        )
+        progress = progress_result.scalar_one_or_none()
+        
+        attempts = progress.total_attempts if progress else 0
+        weight = 10 / (attempts + 1)
+        
+        weighted_cards.extend([card] * int(weight))
+    
+    if not weighted_cards:
+        return random.sample(all_cards, min(limit, len(all_cards)))
+    
+    return random.sample(weighted_cards, min(limit, len(weighted_cards)))
+
+# Статистика
+async def get_user_progress_stats(db: AsyncSession, user_id: int) -> dict:
+    """Получить статистику прогресса пользователя"""
+    total_cards_query = select(func.count(models.Card.id))
+    total_cards_result = await db.execute(total_cards_query)
+    total_cards = total_cards_result.scalar() or 0
+    
+    now = datetime.utcnow()
+    cards_today_query = select(func.count(models.UserCardProgress.id)).where(
+        and_(
+            models.UserCardProgress.user_id == user_id,
+            models.UserCardProgress.next_review <= now
+        )
+    )
+    cards_today_result = await db.execute(cards_today_query)
+    cards_today = cards_today_result.scalar() or 0
+    
+    total_reviews_query = select(func.sum(models.UserCardProgress.total_attempts)).where(
+        models.UserCardProgress.user_id == user_id
+    )
+    total_reviews_result = await db.execute(total_reviews_query)
+    total_reviews = total_reviews_result.scalar() or 0
+    
+    total_correct_query = select(func.sum(models.UserCardProgress.correct_answers)).where(
+        models.UserCardProgress.user_id == user_id
+    )
+    total_correct_result = await db.execute(total_correct_query)
+    total_correct = total_correct_result.scalar() or 0
     
     average_score = 0
     if total_reviews > 0:
         average_score = (total_correct / total_reviews) * 100
     
-    seven_days_ago = datetime.utcnow() - timedelta(days=7)
-    recent_sessions = db.query(models.StudySession).filter(
-        and_(
-            models.StudySession.user_id == user_id,
-            models.StudySession.completed_at >= seven_days_ago
-        )
-    ).count()
+    week_ago = datetime.utcnow() - timedelta(days=7)
     
-    streak_days = min(recent_sessions, 7)
+    activity_days_query = select(
+        func.date(models.UserCardProgress.last_reviewed)
+    ).where(
+        and_(
+            models.UserCardProgress.user_id == user_id,
+            models.UserCardProgress.last_reviewed >= week_ago
+        )
+    ).distinct()
+    
+    activity_days_result = await db.execute(activity_days_query)
+    activity_days = len(set([row[0] for row in activity_days_result.all() if row[0]]))
     
     return {
         "total_cards": total_cards,
-        "cards_today": cards_for_today,
+        "cards_today": cards_today,
         "total_reviews": total_reviews,
         "average_score": round(average_score, 2),
-        "streak_days": streak_days
+        "streak_days": activity_days
     }
