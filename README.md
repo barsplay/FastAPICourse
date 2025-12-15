@@ -19,7 +19,7 @@
 * **SQLAlchemy (async)**
 * **Pydantic**
 * **JWT (OAuth2 Password Flow)**
-* **SQLite
+* **SQLite**
 
 ---
 
