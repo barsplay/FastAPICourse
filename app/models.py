@@ -36,8 +36,6 @@ class UserCardProgress(Base):
     card_id = Column(Integer, ForeignKey("cards.id"), nullable=False)
     correct_answers = Column(Integer, default=0)
     total_attempts = Column(Integer, default=0)
-    last_reviewed = Column(DateTime(timezone=True), nullable=True)
-    next_review = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     

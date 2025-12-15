@@ -67,7 +67,6 @@ class ProgressStats(BaseModel):
     total_cards: int
     total_reviews: int
     average_score: float
-    streak_days: int
 
 class TestAnswer(BaseModel):
     card_id: int

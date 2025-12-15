@@ -125,8 +125,7 @@ async def get_or_create_user_progress(
         if not progress:
             progress = models.UserCardProgress(
                 user_id=user_id,
-                card_id=card_id,
-                next_review=datetime.utcnow()
+                card_id=card_id
             )
             db.add(progress)
             await db.commit()
@@ -153,14 +152,6 @@ async def update_user_progress(
     if is_correct:
         progress.correct_answers += 1
     
-    progress.last_reviewed = datetime.utcnow()
-    
-    if is_correct:
-        interval_days = min(30, 2 ** min(progress.correct_answers, 5))
-    else:
-        interval_days = 1
-    
-    progress.next_review = datetime.utcnow() + timedelta(days=interval_days)
     progress.updated_at = datetime.utcnow()
     
     await db.commit()
@@ -186,38 +177,9 @@ async def get_user_progress_for_card(
     if progress:
         return {
             "correct_answers": progress.correct_answers,
-            "total_attempts": progress.total_attempts,
-            "last_reviewed": progress.last_reviewed,
-            "next_review": progress.next_review
+            "total_attempts": progress.total_attempts
         }
     return None
-
-async def get_cards_for_user_review(
-    db: AsyncSession, 
-    user_id: int, 
-    limit: int = 10
-) -> List[models.Card]:
-    """Получить карточки для повторения пользователем."""
-    now = datetime.utcnow()
-    
-    query = select(models.Card).join(
-        models.UserCardProgress,
-        and_(
-            models.UserCardProgress.card_id == models.Card.id,
-            models.UserCardProgress.user_id == user_id
-        ),
-        isouter=True
-    ).where(
-        or_(
-            models.UserCardProgress.id == None,
-            models.UserCardProgress.next_review <= now
-        )
-    ).order_by(
-        models.UserCardProgress.next_review.asc().nullsfirst()
-    ).limit(limit)
-    
-    result = await db.execute(query)
-    return result.scalars().all()
 
 async def get_random_cards_for_user(
     db: AsyncSession, 
@@ -277,24 +239,10 @@ async def get_user_progress_stats(db: AsyncSession, user_id: int) -> dict:
     average_score = 0
     if total_reviews > 0:
         average_score = (total_correct / total_reviews) * 100
-    
-    week_ago = datetime.utcnow() - timedelta(days=7)
-    
-    activity_days_query = select(
-        func.date(models.UserCardProgress.last_reviewed)
-    ).where(
-        and_(
-            models.UserCardProgress.user_id == user_id,
-            models.UserCardProgress.last_reviewed >= week_ago
-        )
-    ).distinct()
-    
-    activity_days_result = await db.execute(activity_days_query)
-    activity_days = len(set([row[0] for row in activity_days_result.all() if row[0]]))
+
     
     return {
         "total_cards": total_cards,
         "total_reviews": total_reviews,
         "average_score": round(average_score, 2),
-        "streak_days": activity_days
     }
